@@ -6,10 +6,12 @@ MINIKUBE_PROFILE="${MINIKUBE_PROFILE:-sonarqube}"
 MINIKUBE_MEMORY="${MINIKUBE_MEMORY:-4096}"
 MINIKUBE_CPUS="${MINIKUBE_CPUS:-2}"
 NAMESPACE="${NAMESPACE:-sonarqube}"
-SONARQUBE_HOST="${SONARQUBE_HOST:-sonarqube.local}"
 TERRAFORM_DIR="${TERRAFORM_DIR:-terraform}"
 RESET_CLUSTER="${RESET_CLUSTER:-false}"
 STOP_DOCKER_DESKTOP="${STOP_DOCKER_DESKTOP:-true}"
+PORT_FORWARD_PORT="${PORT_FORWARD_PORT:-80}"
+PORT_FORWARD_LOG="${PORT_FORWARD_LOG:-/tmp/sonarqube-port-forward.log}"
+PORT_FORWARD_PID_FILE="${PORT_FORWARD_PID_FILE:-/tmp/sonarqube-port-forward.pid}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 USE_SG_DOCKER="false"
@@ -271,19 +273,68 @@ wait_for_workloads() {
     --timeout=900s
 }
 
-configure_hosts_file() {
-  log "Configuring /etc/hosts"
+get_ec2_public_ip() {
+  local token
+  local public_ip
 
-  local minikube_ip
-  minikube_ip="$(run_docker_group minikube -p "$MINIKUBE_PROFILE" ip)"
+  token="$(curl -fsS -X PUT \
+    "http://169.254.169.254/latest/api/token" \
+    -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" 2>/dev/null || true)"
 
-  if grep -Eq "[[:space:]]${SONARQUBE_HOST}([[:space:]]|$)" /etc/hosts; then
-    sudo sed -i.bak -E "s#^.*[[:space:]]${SONARQUBE_HOST}([[:space:]]|$).*#${minikube_ip} ${SONARQUBE_HOST}#" /etc/hosts
+  if [[ -n "$token" ]]; then
+    public_ip="$(curl -fsS \
+      -H "X-aws-ec2-metadata-token: ${token}" \
+      "http://169.254.169.254/latest/meta-data/public-ipv4" 2>/dev/null || true)"
   else
-    echo "${minikube_ip} ${SONARQUBE_HOST}" | sudo tee -a /etc/hosts >/dev/null
+    public_ip="$(curl -fsS \
+      "http://169.254.169.254/latest/meta-data/public-ipv4" 2>/dev/null || true)"
   fi
 
-  echo "Mapped ${SONARQUBE_HOST} to ${minikube_ip}"
+  echo "$public_ip"
+}
+
+start_port_forward() {
+  log "Starting SonarQube port-forward on 0.0.0.0:${PORT_FORWARD_PORT}"
+
+  if [[ -f "$PORT_FORWARD_PID_FILE" ]]; then
+    local old_pid
+    old_pid="$(cat "$PORT_FORWARD_PID_FILE" || true)"
+
+    if [[ -n "$old_pid" ]] && sudo ps -p "$old_pid" >/dev/null 2>&1; then
+      log "Stopping existing port-forward process: ${old_pid}"
+      sudo kill "$old_pid" || true
+      sleep 2
+    fi
+
+    sudo rm -f "$PORT_FORWARD_PID_FILE"
+  fi
+
+  sudo pkill -f "kubectl port-forward.*svc/sonarqube.*${PORT_FORWARD_PORT}:9000" || true
+
+  sudo nohup env \
+    KUBECONFIG="${HOME}/.kube/config" \
+    PATH="${PATH}" \
+    kubectl port-forward \
+      --address 0.0.0.0 \
+      -n "${NAMESPACE}" \
+      svc/sonarqube \
+      "${PORT_FORWARD_PORT}:9000" \
+    > "${PORT_FORWARD_LOG}" 2>&1 &
+
+  local pf_pid=$!
+  echo "$pf_pid" | sudo tee "$PORT_FORWARD_PID_FILE" >/dev/null
+
+  sleep 5
+
+  if ! sudo ps -p "$pf_pid" >/dev/null 2>&1; then
+    fail "Port-forward failed to start. Check: ${PORT_FORWARD_LOG}"
+  fi
+
+  if ! sudo grep -q "Forwarding from 0.0.0.0:${PORT_FORWARD_PORT}" "$PORT_FORWARD_LOG"; then
+    echo "Port-forward started, but readiness message not found yet."
+    echo "Check logs with:"
+    echo "  sudo tail -f ${PORT_FORWARD_LOG}"
+  fi
 }
 
 print_result() {
@@ -291,17 +342,33 @@ print_result() {
 
   kubectl get pods,svc,ingress -n "$NAMESPACE"
 
+  local public_ip
+  public_ip="$(get_ec2_public_ip)"
+
   echo
-  echo "SonarQube URL:"
-  echo "  http://${SONARQUBE_HOST}"
+  echo "SonarQube access:"
+  if [[ -n "$public_ip" ]]; then
+    echo "  http://${public_ip}"
+  else
+    echo "  http://<EC2_PUBLIC_IP>"
+  fi
+
   echo
   echo "Default login:"
   echo "  username: admin"
   echo "  password: admin"
+
+  echo
+  echo "Port-forward process:"
+  echo "  PID file: ${PORT_FORWARD_PID_FILE}"
+  echo "  Log file: ${PORT_FORWARD_LOG}"
+
   echo
   echo "Useful commands:"
   echo "  kubectl get pods -n ${NAMESPACE}"
   echo "  kubectl logs -n ${NAMESPACE} sonarqube-0 -f"
+  echo "  tail -f ${PORT_FORWARD_LOG}"
+  echo "  kill \$(cat ${PORT_FORWARD_PID_FILE})"
   echo "  terraform -chdir=${TERRAFORM_DIR} destroy -auto-approve"
 }
 
@@ -317,7 +384,8 @@ main() {
   lint_helm_charts
   deploy_with_terraform
   wait_for_workloads
-  configure_hosts_file
+  get_ec2_public_ip
+  start_port_forward
   print_result
 }
 
