@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "sonar.name" . }}
+  labels:
+    {{- include "sonar.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: sonarqube
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http

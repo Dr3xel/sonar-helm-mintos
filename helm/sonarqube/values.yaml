@@ -1,0 +1,24 @@
+replicaCount: 1
+
+image:
+  repository: sonarqube
+  tag: community
+  pullPolicy: IfNotPresent
+
+database:
+  host: postgresql
+  port: 5432
+  name: sonarqube
+  user: sonar
+  password: sonarpassword
+
+service:
+  port: 9000
+
+persistence:
+  size: 10Gi
+
+ingress:
+  enabled: true
+  className: nginx
+  host: sonarqube.local

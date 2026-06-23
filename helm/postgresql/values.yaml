@@ -1,0 +1,18 @@
+replicaCount: 1
+
+image:
+  repository: postgres
+  tag: "16"
+  pullPolicy: IfNotPresent
+
+database:
+  name: sonarqube
+  user: sonar
+  password: sonarpassword
+
+persistence:
+  enabled: true
+  size: 5Gi
+
+service:
+  port: 5432
