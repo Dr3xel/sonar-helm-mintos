@@ -112,7 +112,7 @@ For production, the following <ins>improvements</ins> would be needed:
 
 ## :white_check_mark: Validation Pipeline - Out of Challenge Scope
 
-The repository includes a GitHub Actions pipeline in `.github/workflows/ci.yaml`.
+The repository includes a GitHub Actions pipeline in `.github/workflows/validation.yaml`.
 
 The pipeline runs automatically on push and pull requests. It validates the project without deploying anything by checking:
 
