@@ -1,5 +1,7 @@
 # :trophy: SonarQube on Minikube with Terraform and Custom Helm Charts - DevOps Engineer Assigned Challenge by Mintos
 
+Hello reviewer,
+
 This project deploys SonarQube Community Edition with PostgreSQL on Minikube.
 
 The deployment is automated with:
@@ -107,3 +109,17 @@ For production, the following <ins>improvements</ins> would be needed:
 - Restrict public access
 - Add monitoring and backups
 - Configure production resource requests and limits1
+
+## :white_check_mark: Validation Pipeline - Out of Challenge Scope
+
+The repository includes a GitHub Actions pipeline in `.github/workflows/ci.yaml`.
+
+The pipeline runs automatically on push and pull requests. It validates the project without deploying anything by checking:
+
+- Terraform formatting
+- Terraform initialization and validation
+- Helm chart linting
+- Helm template rendering
+- Rendered Kubernetes manifests using `kubeconform`
+
+This helps catch Terraform, Helm, and Kubernetes manifest issues before running the deployment script.
