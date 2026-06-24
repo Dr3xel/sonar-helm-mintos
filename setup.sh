@@ -337,6 +337,31 @@ start_port_forward() {
   fi
 }
 
+validate_sonarqube_endpoint() {
+  log "Validating SonarQube HTTP endpoint"
+
+  local retries="${SONARQUBE_HTTP_RETRIES:-30}"
+  local delay="${SONARQUBE_HTTP_RETRY_DELAY:-10}"
+  local url="http://127.0.0.1:${PORT_FORWARD_PORT}"
+
+  for attempt in $(seq 1 "$retries"); do
+    if curl -fsSI "$url" >/dev/null 2>&1; then
+      echo "SonarQube is reachable at ${url}"
+      return 0
+    fi
+
+    echo "Waiting for SonarQube HTTP endpoint... attempt ${attempt}/${retries}"
+    sleep "$delay"
+  done
+
+  echo "WARNING: SonarQube did not respond at ${url}"
+  echo "Check logs with:"
+  echo "  kubectl logs -n ${NAMESPACE} sonarqube-0 -f"
+  echo "  sudo tail -f ${PORT_FORWARD_LOG}"
+
+  return 1
+}
+
 print_result() {
   log "Deployment complete"
 
@@ -362,14 +387,6 @@ print_result() {
   echo "Port-forward process:"
   echo "  PID file: ${PORT_FORWARD_PID_FILE}"
   echo "  Log file: ${PORT_FORWARD_LOG}"
-
-  echo
-  echo "Useful commands:"
-  echo "  kubectl get pods -n ${NAMESPACE}"
-  echo "  kubectl logs -n ${NAMESPACE} sonarqube-0 -f"
-  echo "  tail -f ${PORT_FORWARD_LOG}"
-  echo "  kill \$(cat ${PORT_FORWARD_PID_FILE})"
-  echo "  terraform -chdir=${TERRAFORM_DIR} destroy -auto-approve"
 }
 
 main() {
@@ -386,6 +403,7 @@ main() {
   wait_for_workloads
   get_ec2_public_ip
   start_port_forward
+  validate_sonarqube_endpoint
   print_result
 }
 
